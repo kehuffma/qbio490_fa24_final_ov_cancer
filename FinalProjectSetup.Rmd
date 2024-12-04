@@ -1,0 +1,102 @@
+---
+title: "FinalProjectSetup"
+output: word_document
+date: "2024-12-03"
+---
+
+
+```{r}
+# Install/load packages
+if (!require("BiocManager")) install.packages("BiocManager")
+
+if (!require("TCGAbiolinks")) BiocManager::install("TCGAbiolinks")
+
+if (!require("survival")) install.packages("survival")
+
+if(!require("survminer")) install.packages("survminer")
+
+if(!require("ggplot2")) install.packages("ggplot2")
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(SummarizedExperiment)
+library(DESeq2)
+library(sesame)
+library(sesameData)
+library(limma)
+```
+
+
+```{r}
+#transcriptomic
+rna_query <- GDCquery(project = "TCGA-OV", data.category = "Transcriptome Profiling", data.type = "Gene Expression Quantification", workflow.type = "STAR - Counts")
+GDCdownload(rna_query)
+rna_se <- GDCprepare(rna_query)
+ov_rna_clinical <- as.data.frame(rna_se@colData)
+ov_genes <- as.data.frame(rna_se@rowRanges@elementMetadata)
+row.names(ov_genes) <- ov_genes$gene_id
+ov_counts <- as.data.frame(rna_se@assays@data$unstranded)
+row.names(ov_counts) <- ov_genes$gene_id
+colnames(ov_counts) <- ov_rna_clinical$barcode
+```
+
+
+```{r}
+# clinical
+clin_query <- GDCquery(project = "TCGA-OV", data.category = "Clinical", data.type = "Clinical Supplement", data.format = 'BCR Biotab')
+
+GDCdownload(clin_query)
+
+clinical.BCRtab.all <- GDCprepare(clin_query)
+
+ov_clinical <- clinical.BCRtab.all$clinical_patient_ov[-c(1,2),]
+
+colnames(ov_clinical)[ colnames(ov_clinical) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
+```
+
+
+```{r}
+# mutation
+maf_query <- GDCquery(
+  project="TCGA-OV",
+  data.category = "Simple Nucleotide Variation",
+  access = "open",
+  data.type = "Masked Somatic Mutation",
+  workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+GDCdownload(maf_query)
+maf <- GDCprepare(maf_query)
+maf_object <- read.maf(maf=maf, clinicalData = clinical, isTCGA = TRUE)
+```
+
+
+```{r}
+# methylation
+
+# query
+query <- GDCquery(project = "TCGA-OV",
+                  data.category = "DNA Methylation",
+                  data.type = "Methylation Beta Value",
+                  platform = "Illumina Human Methylation 450",
+                  data.format = "Dataframe")
+GDCdownload(query)
+methylation450 <- GDCprepare(query)
+
+
+# modify and save methylation450 data
+ov_methylation_clinical <- as.data.frame(methylation450@colData)
+ov_betas <- as.data.frame(methylation450@assays@data@listData)
+ov_cpg_sites <- as.data.frame(methylation450@rowRanges@elementMetadata)
+
+column_mask <- ifelse(colnames(ov_methylation_clinical) %in% c('treatments', 'primary_site', 'disease_type'), F, T)
+ov_methylation_clinical <- ov_methylation_clinical[,column_mask]
+
+site_mask <- !grepl('-', ov_cpg_sites$gene) & !grepl(';', ov_cpg_sites$gene) & !is.na(ov_cpg_sites$gene) & complete.cases(ov_betas)
+ov_betas <- ov_betas[site_mask,]
+ov_cpg_sites <- ov_cpg_sites[site_mask,]
+```
+
