@@ -70,7 +70,7 @@ maf_query <- GDCquery(
 )
 GDCdownload(maf_query)
 maf <- GDCprepare(maf_query)
-maf_object <- read.maf(maf=maf, clinicalData = clinical, isTCGA = TRUE)
+maf_object <- read.maf(maf=maf, clinicalData = ov_clinical, isTCGA = TRUE)
 ```
 
 
@@ -98,5 +98,105 @@ ov_methylation_clinical <- ov_methylation_clinical[,column_mask]
 site_mask <- !grepl('-', ov_cpg_sites$gene) & !grepl(';', ov_cpg_sites$gene) & !is.na(ov_cpg_sites$gene) & complete.cases(ov_betas)
 ov_betas <- ov_betas[site_mask,]
 ov_cpg_sites <- ov_cpg_sites[site_mask,]
+```
+
+KM plots
+```{r}
+ov_clinical$death_days_to <- suppressWarnings(as.numeric(ov_clinical$death_days_to))
+if (any(is.na(ov_clinical$death_days_to))) {
+  message("NA values introduced in 'death_days_to' due to non-numeric values.")
+}
+
+ov_clinical$last_contact_days_to <- suppressWarnings(as.numeric(ov_clinical$last_contact_days_to))
+if (any(is.na(ov_clinical$last_contact_days_to))) {
+  message("NA values introduced in 'last_contact_days_to' due to non-numeric values.")
+}
+
+#survival time
+ov_clinical$survival_time <- ifelse(
+  !is.na(ov_clinical$death_days_to),
+  ov_clinical$death_days_to,
+  ov_clinical$last_contact_days_to
+)
+
+#removing NAs
+ov_clinical <- ov_clinical[!is.na(ov_clinical$survival_time), ]
+
+ov_clinical$death_event <- ifelse(ov_clinical$vital_status == "Dead", TRUE, FALSE)
+
+```
+
+```{r}
+#add BRCA Mutation Status to Clinical Data
+brca1_mask <- maf_object@data$Hugo_Symbol == "BRCA1"
+brca2_mask <- maf_object@data$Hugo_Symbol == "BRCA2"
+
+brca1_barcodes <- unique(maf_object@data$Tumor_Sample_Barcode[brca1_mask])
+brca2_barcodes <- unique(maf_object@data$Tumor_Sample_Barcode[brca2_mask])
+
+ov_clinical$BRCA1 <- ifelse(ov_clinical$Tumor_Sample_Barcode %in% brca1_barcodes, "Mutated", "Not Mutated")
+ov_clinical$BRCA2 <- ifelse(ov_clinical$Tumor_Sample_Barcode %in% brca2_barcodes, "Mutated", "Not Mutated")
+ov_clinical$BRCA <- ifelse(ov_clinical$BRCA1 == "Mutated" | ov_clinical$BRCA2 == "Mutated", "Mutated", "Not Mutated")
+
+
+ov_clinical$BRCA <- factor(ov_clinical$BRCA, levels = c("Not Mutated", "Mutated"))
+ov_clinical$BRCA1 <- factor(ov_clinical$BRCA1, levels = c("Not Mutated", "Mutated"))
+ov_clinical$BRCA2 <- factor(ov_clinical$BRCA2, levels = c("Not Mutated", "Mutated"))
+```
+
+
+
+```{r}
+#KM Survival Curves
+survival_object <- Surv(time = ov_clinical$survival_time, event = ov_clinical$death_event)
+
+fit_brca <- survfit(survival_object ~ BRCA, data = ov_clinical)
+fit_brca1 <- survfit(survival_object ~ BRCA1, data = ov_clinical)
+fit_brca2 <- survfit(survival_object ~ BRCA2, data = ov_clinical)
+```
+
+
+```{r}
+#BRCA Combined
+plot_brca <- ggsurvplot(
+  fit_brca, 
+  pval = TRUE, 
+  risk.table = TRUE,
+  title = "Kaplan-Meier Curve: BRCA Mutation Status",
+  xlab = "Time (days)", 
+  ylab = "Survival Probability",
+  legend.labs = c("Not Mutated", "Mutated")
+)
+
+#BRCA1
+plot_brca1 <- ggsurvplot(
+  fit_brca1, 
+  pval = TRUE, 
+  risk.table = TRUE,
+  title = "Kaplan-Meier Curve: BRCA1 Mutation Status",
+  xlab = "Time (days)", 
+  ylab = "Survival Probability",
+  legend.labs = c("Not Mutated", "Mutated")
+)
+
+#BRCA2
+plot_brca2 <- ggsurvplot(
+  fit_brca2, 
+  pval = TRUE, 
+  risk.table = TRUE,
+  title = "Kaplan-Meier Curve: BRCA2 Mutation Status",
+  xlab = "Time (days)", 
+  ylab = "Survival Probability",
+  legend.labs = c("Not Mutated", "Mutated")
+)
+
+ggsave("KM_BRCAMutations.png", plot = plot_brca$plot, width = 8, height = 6)
+ggsave("KM_BRCA1.png", plot = plot_brca1$plot, width = 8, height = 6)
+ggsave("KM_BRCA2.png", plot = plot_brca2$plot, width = 8, height = 6)
+
+#display Plots
+print(plot_brca$plot)
+print(plot_brca1$plot)
+print(plot_brca2$plot)
 ```
 
