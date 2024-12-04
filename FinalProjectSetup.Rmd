@@ -3,7 +3,8 @@ title: "FinalProjectSetup"
 output: word_document
 date: "2024-12-03"
 ---
-
+  
+  
 
 ```{r}
 # Install and load required packages
