@@ -3,100 +3,184 @@ title: "FinalProjectSetup"
 output: word_document
 date: "2024-12-03"
 ---
-
+  
 
 ```{r}
-# Install/load packages
+# Install and load required packages
 if (!require("BiocManager")) install.packages("BiocManager")
 
 if (!require("TCGAbiolinks")) BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)
 
 if (!require("survival")) install.packages("survival")
-
-if(!require("survminer")) install.packages("survminer")
-
-if(!require("ggplot2")) install.packages("ggplot2")
-
-library(BiocManager)
-library(TCGAbiolinks)
-library(maftools)
 library(survival)
+
+if (!require("survminer")) install.packages("survminer")
 library(survminer)
+
+if (!require("ggplot2")) install.packages("ggplot2")
 library(ggplot2)
+
+if (!require("maftools")) BiocManager::install("maftools")
+library(maftools)
+
+if (!require("SummarizedExperiment")) BiocManager::install("SummarizedExperiment")
 library(SummarizedExperiment)
+
+if (!require("DESeq2")) BiocManager::install("DESeq2")
 library(DESeq2)
+
+if (!require("sesame")) BiocManager::install("sesame")
 library(sesame)
+
+if (!require("sesameData")) BiocManager::install("sesameData")
 library(sesameData)
+
+if (!require("limma")) BiocManager::install("limma")
 library(limma)
 ```
 
 
 ```{r}
-#transcriptomic
-rna_query <- GDCquery(project = "TCGA-OV", data.category = "Transcriptome Profiling", data.type = "Gene Expression Quantification", workflow.type = "STAR - Counts")
-GDCdownload(rna_query)
-rna_se <- GDCprepare(rna_query)
-ov_rna_clinical <- as.data.frame(rna_se@colData)
-ov_genes <- as.data.frame(rna_se@rowRanges@elementMetadata)
-row.names(ov_genes) <- ov_genes$gene_id
-ov_counts <- as.data.frame(rna_se@assays@data$unstranded)
-row.names(ov_counts) <- ov_genes$gene_id
-colnames(ov_counts) <- ov_rna_clinical$barcode
+# Query and download RNA-seq data from TCGA
+# This section downloads RNA expression quantification data for TCGA-OV
+rna_query <- GDCquery(
+  project = "TCGA-OV",  # Specify the project: Ovarian Cancer
+  data.category = "Transcriptome Profiling",
+  data.type = "Gene Expression Quantification",
+  workflow.type = "STAR - Counts"  # STAR alignment pipeline
+)
+GDCdownload(rna_query)  # Download the data
+rna_se <- GDCprepare(rna_query)  # Prepare the data into SummarizedExperiment format
+ov_rna_clinical <- as.data.frame(rna_se@colData)  # Extract clinical metadata from RNA-seq
 ```
 
 
 ```{r}
-# clinical
-clin_query <- GDCquery(project = "TCGA-OV", data.category = "Clinical", data.type = "Clinical Supplement", data.format = 'BCR Biotab')
-
-GDCdownload(clin_query)
-
-clinical.BCRtab.all <- GDCprepare(clin_query)
-
-ov_clinical <- clinical.BCRtab.all$clinical_patient_ov[-c(1,2),]
-
-colnames(ov_clinical)[ colnames(ov_clinical) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
+# Query and download clinical data from TCGA
+clin_query <- GDCquery(
+  project = "TCGA-OV",  # Specify the project: Ovarian Cancer
+  data.category = "Clinical",
+  data.type = "Clinical Supplement",
+  data.format = "BCR Biotab"
+)
+GDCdownload(clin_query)  # Download the data
+clinical.BCRtab.all <- GDCprepare(clin_query)  # Prepare the data
+ov_clinical <- clinical.BCRtab.all$clinical_patient_ov[-c(1,2),]  # Remove non-patient data rows
+colnames(ov_clinical)[colnames(ov_clinical) == "bcr_patient_barcode"] <- "Tumor_Sample_Barcode"  # Rename key column
 ```
 
 
 ```{r}
-# mutation
+# Query and prepare mutation data
+# This section focuses on extracting BRCA1 and BRCA2 mutation data
 maf_query <- GDCquery(
-  project="TCGA-OV",
+  project = "TCGA-OV",
   data.category = "Simple Nucleotide Variation",
   access = "open",
   data.type = "Masked Somatic Mutation",
   workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
 )
-GDCdownload(maf_query)
-maf <- GDCprepare(maf_query)
-maf_object <- read.maf(maf=maf, clinicalData = clinical, isTCGA = TRUE)
+GDCdownload(maf_query)  # Download the mutation data
+maf <- GDCprepare(maf_query)  # Prepare the mutation data
+maf_object <- read.maf(maf = maf, clinicalData = ov_clinical, isTCGA = TRUE)  # Create a MAF object
+
+# Add BRCA mutation statuses to clinical data
+brca1_mask <- maf_object@data$Hugo_Symbol == "BRCA1"
+brca2_mask <- maf_object@data$Hugo_Symbol == "BRCA2"
+
+brca1_barcodes <- unique(maf_object@data$Tumor_Sample_Barcode[brca1_mask])
+brca2_barcodes <- unique(maf_object@data$Tumor_Sample_Barcode[brca2_mask])
+
+ov_clinical$BRCA1 <- ifelse(ov_clinical$Tumor_Sample_Barcode %in% brca1_barcodes, "Mutated", "Not Mutated")
+ov_clinical$BRCA2 <- ifelse(ov_clinical$Tumor_Sample_Barcode %in% brca2_barcodes, "Mutated", "Not Mutated")
+ov_clinical$BRCA <- ifelse(ov_clinical$BRCA1 == "Mutated" | ov_clinical$BRCA2 == "Mutated", "Mutated", "Not Mutated")
+
+# Convert mutation statuses to factors
+ov_clinical$BRCA <- factor(ov_clinical$BRCA, levels = c("Not Mutated", "Mutated"))
+ov_clinical$BRCA1 <- factor(ov_clinical$BRCA1, levels = c("Not Mutated", "Mutated"))
+ov_clinical$BRCA2 <- factor(ov_clinical$BRCA2, levels = c("Not Mutated", "Mutated"))
 ```
 
 
 ```{r}
-# methylation
+# Prepare survival data
+# This section calculates survival times and events based on clinical data
+ov_clinical$death_days_to <- suppressWarnings(as.numeric(ov_clinical$death_days_to))
+ov_clinical$last_contact_days_to <- suppressWarnings(as.numeric(ov_clinical$last_contact_days_to))
 
-# query
-query <- GDCquery(project = "TCGA-OV",
-                  data.category = "DNA Methylation",
-                  data.type = "Methylation Beta Value",
-                  platform = "Illumina Human Methylation 450",
-                  data.format = "Dataframe")
-GDCdownload(query)
-methylation450 <- GDCprepare(query)
+ov_clinical$survival_time <- ifelse(
+  !is.na(ov_clinical$death_days_to),
+  ov_clinical$death_days_to,
+  ov_clinical$last_contact_days_to
+)
 
+# Remove patients with missing survival times
+ov_clinical <- ov_clinical[!is.na(ov_clinical$survival_time), ]
 
-# modify and save methylation450 data
-ov_methylation_clinical <- as.data.frame(methylation450@colData)
-ov_betas <- as.data.frame(methylation450@assays@data@listData)
-ov_cpg_sites <- as.data.frame(methylation450@rowRanges@elementMetadata)
-
-column_mask <- ifelse(colnames(ov_methylation_clinical) %in% c('treatments', 'primary_site', 'disease_type'), F, T)
-ov_methylation_clinical <- ov_methylation_clinical[,column_mask]
-
-site_mask <- !grepl('-', ov_cpg_sites$gene) & !grepl(';', ov_cpg_sites$gene) & !is.na(ov_cpg_sites$gene) & complete.cases(ov_betas)
-ov_betas <- ov_betas[site_mask,]
-ov_cpg_sites <- ov_cpg_sites[site_mask,]
+# Create a binary event indicator (1: death, 0: censored)
+ov_clinical$death_event <- ifelse(ov_clinical$vital_status == "Dead", TRUE, FALSE)
 ```
+
+
+KM plots
+```{r}
+# Create Kaplan-Meier survival curves for BRCA mutation groups
+survival_object <- Surv(time = ov_clinical$survival_time, event = ov_clinical$death_event)
+
+fit_brca <- survfit(survival_object ~ BRCA, data = ov_clinical)  # Combined BRCA mutations
+fit_brca1 <- survfit(survival_object ~ BRCA1, data = ov_clinical)  # BRCA1 mutations
+fit_brca2 <- survfit(survival_object ~ BRCA2, data = ov_clinical)  # BRCA2 mutations
+
+```
+
+```{r}
+# Generate KM plots
+# Generate Kaplan-Meier plots and save them
+output_dir <- "outputs"  # Create outputs folder
+if (!dir.exists(output_dir)) dir.create(output_dir)
+
+# Generate plots
+plot_brca <- ggsurvplot(
+  fit_brca,
+  pval = TRUE,
+  risk.table = TRUE,
+  title = "Kaplan-Meier Curve: BRCA Mutation Status",
+  xlab = "Time (days)",
+  ylab = "Survival Probability",
+  legend.labs = c("Not Mutated", "Mutated")
+)
+
+plot_brca1 <- ggsurvplot(
+  fit_brca1,
+  pval = TRUE,
+  risk.table = TRUE,
+  title = "Kaplan-Meier Curve: BRCA1 Mutation Status",
+  xlab = "Time (days)",
+  ylab = "Survival Probability",
+  legend.labs = c("Not Mutated", "Mutated")
+)
+
+plot_brca2 <- ggsurvplot(
+  fit_brca2,
+  pval = TRUE,
+  risk.table = TRUE,
+  title = "Kaplan-Meier Curve: BRCA2 Mutation Status",
+  xlab = "Time (days)",
+  ylab = "Survival Probability",
+  legend.labs = c("Not Mutated", "Mutated")
+)
+
+# Save plots to output folder
+ggsave(paste0(output_dir, "/KM_BRCAMutations.png"), plot = plot_brca$plot, width = 8, height = 6)
+ggsave(paste0(output_dir, "/KM_BRCA1.png"), plot = plot_brca1$plot, width = 8, height = 6)
+ggsave(paste0(output_dir, "/KM_BRCA2.png"), plot = plot_brca2$plot, width = 8, height = 6)
+
+# Display plots
+print(plot_brca$plot)
+print(plot_brca1$plot)
+print(plot_brca2$plot)
+```
+
+
 
